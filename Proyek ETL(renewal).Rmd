@@ -1,0 +1,205 @@
+---
+title: "Laporan Projek UAS R"
+author: "Joshua"
+date: "2024-11-17"
+output: word_document
+---
+
+## Setup dan Konfigurasi
+```{r}
+# Libraries
+library(dplyr)
+library(lubridate)
+library(readr)
+library(R.utils)
+
+# Konfigurasi
+config <- list(
+    input_path = "player_liga1.csv",
+    output_path = "cleaned_player_liga1.csv",
+    backup_enabled = TRUE,
+    compression_enabled = TRUE,
+    working_dir = "C:/Users/ASUS/OneDrive/Documents/PENS-EEPIS/SDT A Semester 1 2024/Statistika/Projek akhir semester/3324600011_Joshua Remedial Syeba_ETL"
+)
+
+# Fungsi logging
+log_message <- function(message, type = "INFO") {
+    timestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+    cat(sprintf("[%s] %s: %s\n", timestamp, type, message))
+}
+```
+
+## Extract 
+```{r}
+# Validasi dan pembacaan data
+extract_data <- function(config) {
+    tryCatch({
+        # Validasi file
+        if (!file.exists(config$input_path)) {
+            stop("File tidak ditemukan!")
+        }
+        
+        # Baca data
+        log_message("Mulai membaca data")
+        plyr <- read.csv(config$input_path, stringsAsFactors = FALSE)
+        
+        # Cek struktur data
+        log_message("Mengecek struktur data")
+        str(plyr)
+        
+        # Quality check awal
+        initial_report <- generate_quality_report(plyr)
+        log_message("Laporan kualitas awal dibuat")
+        
+        return(plyr)
+    }, error = function(e) {
+        log_message(paste("Error dalam ekstraksi:", e$message), "ERROR")
+        stop(e)
+    })
+}
+# Melihat data awal
+print(head(plyr))
+View(plyr)
+```
+
+# Transform
+```{r}
+transform_data <- function(plyr) {
+    # Fungsi validasi data
+    validate_data <- function(df) {
+        if(any(df$height > 2.5 | df$height < 1.5, na.rm = TRUE)) {
+            warning("Ada tinggi badan tidak normal")
+        }
+        if(any(df$market_value < 0, na.rm = TRUE)) {
+            warning("Ada market value negatif")
+        }
+    }
+
+    # 1. Penanganan missing values
+    log_message("Menangani missing values")
+    plyr[plyr == "-"] <- NA
+    plyr[plyr == ""] <- NA
+    
+# 2. Drop baris penting yang kosong
+    log_message("Menghapus baris dengan data kritis yang hilang")
+    plyr <- subset(plyr, Date.of.birth...Age != "" & !is.null(Date.of.birth...Age))
+    plyr <- plyr[!is.na(plyr$joined), ]
+    
+    # 3. Pembersihan kolom dengan penanganan error
+    tryCatch({
+        # Kit number
+        mode_kit_number <- as.numeric(names(sort(table(plyr$kit_number), decreasing = TRUE))[1])
+        plyr$kit_number[is.na(plyr$kit_number)] <- mode_kit_number
+        
+        # Foot
+        mode_foot <- names(sort(table(plyr$foot), decreasing = TRUE))[1]
+        plyr$foot[is.na(plyr$foot)] <- mode_foot
+        
+        # Contract
+        plyr$contract <- as.numeric(plyr$contract)
+        mean_contract <- mean(plyr$contract, na.rm = TRUE)
+        plyr$contract[is.na(plyr$contract)] <- round(mean_contract, 0)
+        
+        # Signed from
+        plyr$signed_from[is.na(plyr$signed_from)] <- "Without Club"
+        
+        # Market value
+        plyr$market_value <- gsub("[€k]", "", plyr$market_value)
+        plyr$market_value <- as.numeric(gsub("m", "000000", plyr$market_value))
+        mean_market_value <- mean(plyr$market_value, na.rm = TRUE)
+        plyr$market_value[is.na(plyr$market_value)] <- mean_market_value
+        
+        # Height
+        plyr$height <- as.numeric(gsub("m", "", gsub(",", ".", plyr$height)))
+        mean_height <- mean(plyr$height, na.rm = TRUE)
+        plyr$height[is.na(plyr$height)] <- mean_height
+        
+        # Validasi hasil transformasi
+        validate_data(plyr)
+        
+        return(plyr)
+    }, error = function(e) {
+        log_message(paste("Error dalam transformasi:", e$message), "ERROR")
+        stop(e)
+    })
+}
+```
+
+## Load
+```{r}
+load_data <- function(plyr, config) {
+    tryCatch({
+        # Validasi final
+        log_message("Melakukan validasi akhir")
+        if(any(is.na(plyr))) {
+            warning("Masih ada nilai NA dalam dataset")
+        }
+        
+        # Backup data
+        if(config$backup_enabled) {
+            timestamp <- format(Sys.time(), "%Y%m%d_%H%M")
+            backup_file <- paste0("backup_", timestamp, "_", basename(config$output_path))
+            write.csv(plyr, backup_file, row.names = TRUE)
+            log_message(paste("Backup dibuat:", backup_file))
+            
+            # Kompresi backup jika diaktifkan
+            if(config$compression_enabled) {
+                gzip(backup_file)
+                log_message("Backup dikompresi")
+            }
+        }
+        
+        # Simpan hasil akhir
+        write.csv(plyr, config$output_path, row.names = TRUE)
+        log_message(paste("Data berhasil disimpan ke:", config$output_path))
+        
+    }, error = function(e) {
+        log_message(paste("Error dalam penyimpanan:", e$message), "ERROR")
+        stop(e)
+    })
+}
+```
+
+## 5. Main Execution
+```{r}
+# Fungsi laporan kualitas
+generate_quality_report <- function(df) {
+    list(
+        missing_values = colSums(is.na(df)),
+        unique_values = sapply(df, function(x) length(unique(x))),
+        data_types = sapply(df, class)
+    )
+}
+
+# Eksekusi utama
+main <- function(config) {
+    log_message("Memulai proses ETL")
+    
+    # Set working directory
+    setwd(config$working_dir)
+    
+    # Extract
+    plyr <- extract_data(config)
+    
+    # Transform
+    plyr <- transform_data(plyr)
+    
+    # Load
+    load_data(plyr, config)
+    
+    log_message("Proses ETL selesai")
+}
+
+# Jalankan proses
+tryCatch({
+    main(config)
+}, error = function(e) {
+    log_message(paste("Error dalam proses ETL:", e$message), "ERROR")
+})
+```
+```{r}
+df <- read.csv("cleaned_player_liga1.csv", stringsAsFactors = FALSE)
+View(df)
+```
+
+
