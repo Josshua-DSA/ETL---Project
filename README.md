@@ -98,7 +98,7 @@ install.packages(c("dplyr", "lubridate", "readr", "ggplot2", "R.utils"))
 - Automate ETL pipeline using **scheduled R scripts**.  
 
 ## 📌 Contact & Links
-🔗 **GitHub Repository:** [Your Repo Link]  
+🔗 **GitHub Repository:** [https://github.com/Josshua-DSA/ETL---Project/edit/main/README.md]  
 🔗 **LinkedIn Profile:** [(https://www.linkedin.com/in/joshua-remedial-syeba-0024a8326/?trk=opento_sprofile_topcard)]  
 
 ---
